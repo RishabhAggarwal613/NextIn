@@ -1,5 +1,9 @@
 import React from "react";
-import { Provider as PaperProvider, MD3DarkTheme, MD3LightTheme } from "react-native-paper";
+import {
+  Provider as PaperProvider,
+  MD3DarkTheme,
+  MD3LightTheme,
+} from "react-native-paper";
 import { useColorScheme } from "react-native";
 
 const brand = "#6C63FF";
@@ -15,6 +19,7 @@ const light = {
     onPrimary: "white",
   },
 };
+
 const dark = {
   ...MD3DarkTheme,
   colors: {

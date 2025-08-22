@@ -1,6 +1,8 @@
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { SCREENS } from "./types";
+
+// Screens (you'll add these files next)
 import RoleSelectScreen from "../screens/RoleSelectScreen";
 import CreateQueueScreen from "../screens/Client/CreateQueueScreen";
 import QueueControlScreen from "../screens/Client/QueueControlScreen";
@@ -11,7 +13,10 @@ const Stack = createNativeStackNavigator();
 
 export default function RootNavigator() {
   return (
-    <Stack.Navigator initialRouteName={SCREENS.RoleSelect} screenOptions={{ headerShown: false }}>
+    <Stack.Navigator
+      initialRouteName={SCREENS.RoleSelect}
+      screenOptions={{ headerShown: false }}
+    >
       <Stack.Screen name={SCREENS.RoleSelect} component={RoleSelectScreen} />
       <Stack.Screen name={SCREENS.CreateQueue} component={CreateQueueScreen} />
       <Stack.Screen name={SCREENS.QueueControl} component={QueueControlScreen} />
