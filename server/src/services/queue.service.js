@@ -1,29 +1,28 @@
 import Queue from "../models/Queue.js";
-import { customAlphabet } from "nanoid";
-
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const genQueueId = customAlphabet(ALPHABET, 6);
+import { genQueueId } from "../utils/id.js";
 
 /** Create a new queue owned by userId */
 export async function createQueue(ownerId, name) {
   return Queue.create({
     queueId: genQueueId(),
     owner: ownerId,
-    name,
+    name: String(name || "My Queue").trim().slice(0, 60),
   });
 }
 
-/** Get queue by its public queueId */
+/** Get queue by its public queueId (case-insensitive input) */
 export async function getQueue(queueId) {
-  return Queue.findOne({ queueId });
+  const id = String(queueId || "").toUpperCase();
+  return Queue.findOne({ queueId: id });
 }
 
 /** Compute waiting totals from counters */
 export function computeTotals(q) {
-  // tickets issued go from 1..(nextTicket-1); servedTicket is last served
-  const total = q.nextTicket - q.servedTicket - 1;
+  const issued = Math.max(0, (q.nextTicket ?? 1) - 1);   // tickets issued so far
+  const served = Math.max(0, q.servedTicket ?? 0);       // last served ticket #
+  const total = Math.max(0, issued - served);            // people currently waiting
   return {
-    total: Math.max(0, total),
+    total,
     nextTicket: q.nextTicket,
     servedTicket: q.servedTicket,
   };
@@ -31,9 +30,13 @@ export function computeTotals(q) {
 
 /** Join queue; returns { ticket, position, total } */
 export async function join(q, { name, phone }) {
-  const ticket = q.nextTicket++;
+  // NOTE: This is simple and adequate for MVP. For full atomicity under heavy concurrency,
+  // switch to a single "aggregation pipeline" findOneAndUpdate or a transaction.
+  const ticket = q.nextTicket;
+  q.nextTicket = ticket + 1;
   q.entries.push({ name, phone, ticket });
   await q.save();
+
   const position = Math.max(0, ticket - q.servedTicket);
   const { total } = computeTotals(q);
   return { ticket, position, total };
@@ -47,7 +50,6 @@ export async function serveNext(q) {
   }
 
   const now = new Date();
-  // compute delta between serves (ms)
   const previous = q.lastServedAt || now;
   const delta = now.getTime() - previous.getTime();
 
@@ -55,11 +57,15 @@ export async function serveNext(q) {
   q.servedTicket += 1;
 
   // drop already served entries for consistency (optional optimization)
-  q.entries = q.entries.filter((e) => e.ticket > q.servedTicket);
+  if (Array.isArray(q.entries) && q.entries.length) {
+    q.entries = q.entries.filter((e) => e.ticket > q.servedTicket);
+  }
 
-  // update moving average of service time
-  const n = q.statsWindow || 10;
-  q.avgServiceMs = Math.round((q.avgServiceMs * (n - 1) + delta) / n);
+  // update moving average of service time with clamps
+  const n = Math.max(1, Math.min(q.statsWindow || 10, 100));
+  const base = Number.isFinite(q.avgServiceMs) ? q.avgServiceMs : 5 * 60 * 1000;
+  const updatedAvg = Math.round((base * (n - 1) + Math.max(1000, delta)) / n);
+  q.avgServiceMs = Math.max(1000, updatedAvg); // ≥ 1s
   q.lastServedAt = now;
 
   await q.save();
@@ -70,8 +76,11 @@ export async function serveNext(q) {
 
 /** ETA in minutes range + confidence based on variability */
 export function eta(position, avgServiceMs, stdMs) {
-  const minutes = Math.max(0, position) * (avgServiceMs / 60000);
-  // spread: use provided std dev or fallback 20% of estimate (min 1 min)
+  const avg = Number.isFinite(avgServiceMs) ? avgServiceMs : 5 * 60 * 1000;
+  const pos = Math.max(0, Number(position) || 0);
+  const minutes = (pos * avg) / 60000;
+
+  // spread: use provided std dev or fallback 20% (min 1 min)
   const spread =
     typeof stdMs === "number"
       ? Math.min(minutes * 0.5, stdMs / 60000)
@@ -80,9 +89,8 @@ export function eta(position, avgServiceMs, stdMs) {
   const low = Math.max(0, Math.round(minutes - spread));
   const high = Math.round(minutes + spread);
 
-  const ratio =
-    typeof stdMs === "number" ? stdMs / Math.max(avgServiceMs, 1) : 0.3;
-
+  const ratio = typeof stdMs === "number" ? stdMs / Math.max(avg, 1) : 0.3;
   const confidence = ratio < 0.25 ? "high" : ratio < 0.5 ? "medium" : "low";
+
   return { low, high, confidence };
 }

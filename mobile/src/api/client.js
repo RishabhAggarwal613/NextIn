@@ -1,23 +1,13 @@
 import axios from "axios";
-import Constants from "expo-constants";
+import { API_BASE } from "../config/env";
 
-// Read API URL from app.json → extra
-const { API_URL } = Constants.expoConfig.extra;
+export const api = axios.create({ baseURL: API_BASE, timeout: 10000 });
 
-// Create axios instance
-export const api = axios.create({ baseURL: API_URL });
-
-// Token storage (in-memory; you can persist to AsyncStorage later)
-let _token = null;
-
-export const setToken = (t) => {
-  _token = t;
-};
-
-// Attach token automatically to requests
-api.interceptors.request.use((config) => {
-  if (_token) {
-    config.headers.Authorization = `Bearer ${_token}`;
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    const msg = err?.response?.data?.error || err.message;
+    console.warn("[api]", msg);
+    throw err;
   }
-  return config;
-});
+);

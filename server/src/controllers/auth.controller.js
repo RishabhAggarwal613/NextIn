@@ -1,10 +1,9 @@
-// src/controllers/auth.controller.js
 import * as authService from "../services/auth.service.js";
 
-/**
- * POST /api/v1/auth/register
- * body: { name, email, password }
- */
+const isEmail = (s) =>
+  typeof s === "string" &&
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim()); // simple, robust
+
 export async function postRegister(req, res, next) {
   try {
     let { name, email, password } = req.body || {};
@@ -15,6 +14,12 @@ export async function postRegister(req, res, next) {
     if (!name || !email || !password) {
       return res.status(400).json({ error: "missing_fields" });
     }
+    if (!isEmail(email)) {
+      return res.status(400).json({ error: "invalid_email" });
+    }
+    if (name.length > 60) {
+      return res.status(400).json({ error: "name_too_long" });
+    }
     if (password.length < 6) {
       return res.status(400).json({ error: "weak_password" });
     }
@@ -22,16 +27,11 @@ export async function postRegister(req, res, next) {
     const out = await authService.register(name, email, password);
     return res.status(201).json(out);
   } catch (e) {
-    // surface known service errors with status if present
     if (e.status) return res.status(e.status).json({ error: e.message });
     return next(e);
   }
 }
 
-/**
- * POST /api/v1/auth/login
- * body: { email, password }
- */
 export async function postLogin(req, res, next) {
   try {
     let { email, password } = req.body || {};
@@ -40,6 +40,9 @@ export async function postLogin(req, res, next) {
 
     if (!email || !password) {
       return res.status(400).json({ error: "missing_fields" });
+    }
+    if (!isEmail(email)) {
+      return res.status(400).json({ error: "invalid_email" });
     }
 
     const out = await authService.login(email, password);

@@ -4,13 +4,14 @@ import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import mongoose from "mongoose";
-import dotenv from "dotenv";
 
-import { env } from "./config/env.js";              // ← centralized env
+import { env } from "./config/env.js";
+import { connectDB } from "./config/db.js";
+import { errorHandler } from "./middleware/error.js";
+import { initQueueNamespace } from "./sockets/queue.namespace.js";
+
 import authRoutes from "./routes/auth.routes.js";
 import queueRoutes from "./routes/queue.routes.js";
-
-dotenv.config();
 
 // ====== Express ======
 const app = express();
@@ -27,43 +28,22 @@ const io = new Server(server, { cors: { origin: env.CORS_ORIGIN } });
 // Make io available to controllers via req.app.get("io")
 app.set("io", io);
 
-// Socket namespace + room joins
-const SOCKET_NAMESPACE = "/q";
-const ROOM = (id) => `queue:${id}`;
-
-io.of(SOCKET_NAMESPACE).on("connection", (socket) => {
-  socket.on("room:join", ({ queueId }) => {
-    if (queueId) socket.join(ROOM(queueId));
-  });
-});
-
-// Convenience emitter for queue rooms
-io.queueEmit = (queueId, event, payload) => {
-  io.of(SOCKET_NAMESPACE).to(ROOM(queueId)).emit(event, payload);
-};
+// Socket namespace (rooms + io.queueEmit helper)
+initQueueNamespace(io);
 
 // ====== Routes ======
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/queues", queueRoutes);
 
 // ====== Error handler (keep last) ======
-app.use((err, _req, res, _next) => {
-  const code = err.status || 500;
-  if (env.NODE_ENV !== "production") console.error(err);
-  res.status(code).json({ error: err.message || "server_error" });
-});
+app.use(errorHandler);
 
 // ====== Start ======
 (async () => {
   try {
-    await mongoose.connect(env.MONGO_URL, {
-      serverApi: { version: "1", strict: true, deprecationErrors: true },
-    });
-    console.log("[db] MongoDB connected");
-
+    await connectDB();
     server.listen(env.PORT, () => {
-      console.log(`[srv] NextIn API running at http://localhost:${env.PORT}`);
-      console.log(`[ws ] Socket namespace ready at ${SOCKET_NAMESPACE}`);
+      console.log(`[srv] NextIn API http://localhost:${env.PORT}`);
     });
   } catch (e) {
     console.error("[boot] Failed to start:", e);

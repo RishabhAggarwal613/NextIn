@@ -1,35 +1,51 @@
-import { SOCKET_NAMESPACE, ROOM } from "../constants/index.js";
+import { SOCKET_NAMESPACE, ROOM, EVENTS } from "../constants/index.js";
+
+const isValidQueueId = (s) => /^[A-Z2-9]{6}$/.test(String(s || "").toUpperCase());
 
 /**
- * Initializes the queue namespace for Socket.IO
- * Listens for room joins and provides a helper to emit to specific queues.
- *
+ * Initialize the queue namespace and attach a room emitter helper.
  * Usage in src/index.js:
  *   import { initQueueNamespace } from "./sockets/queue.namespace.js";
- *   const nsp = initQueueNamespace(io);
+ *   initQueueNamespace(io);
  */
 export function initQueueNamespace(io) {
   const nsp = io.of(SOCKET_NAMESPACE);
 
-  nsp.on("connection", (socket) => {
-    console.log("[ws] client connected to namespace:", SOCKET_NAMESPACE);
+  // Expose a single helper to emit to a queue room (id normalized)
+  if (!io.queueEmit) {
+    io.queueEmit = (queueId, event, payload) => {
+      const id = String(queueId || "").toUpperCase();
+      if (!isValidQueueId(id)) return;
+      nsp.to(ROOM(id)).emit(event, payload);
+    };
+  }
 
-    socket.on("room:join", ({ queueId }) => {
-      if (queueId) {
-        socket.join(ROOM(queueId));
-        console.log(`[ws] socket ${socket.id} joined room queue:${queueId}`);
+  nsp.on("connection", (socket) => {
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[ws] connected ${socket.id} -> ${SOCKET_NAMESPACE}`);
+    }
+
+    // Client asks to join a queue room
+    socket.on(EVENTS.ROOM_JOIN, (data = {}, ack) => {
+      const id = String(data.queueId || "").toUpperCase();
+      if (!isValidQueueId(id)) {
+        if (typeof ack === "function") ack({ ok: false, error: "bad_queue_id" });
+        return;
+      }
+      socket.join(ROOM(id));
+      if (typeof ack === "function") ack({ ok: true, room: ROOM(id) });
+
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[ws] ${socket.id} joined ${ROOM(id)}`);
       }
     });
 
     socket.on("disconnect", () => {
-      console.log("[ws] client disconnected:", socket.id);
+      if (process.env.NODE_ENV !== "production") {
+        console.log(`[ws] disconnected ${socket.id}`);
+      }
     });
   });
-
-  // Add a helper so controllers/services can push updates:
-  io.queueEmit = (queueId, event, payload) => {
-    nsp.to(ROOM(queueId)).emit(event, payload);
-  };
 
   return nsp;
 }
